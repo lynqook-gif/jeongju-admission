@@ -511,6 +511,11 @@ footer img{height:34px; width:auto; opacity:.9}
           <label for="cf-msg">문의 내용</label>
           <textarea id="cf-msg" name="msg" placeholder="궁금하신 내용을 적어 주시면 담당 선생님이 미리 확인하고 연락드립니다."></textarea>
         </div>
+        <!-- 봇 차단용 숨은 칸: 사람에게는 보이지 않으며, 채워지면 전송하지 않음 -->
+        <div aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden">
+          <label for="cf-hp">이 칸은 비워 두세요</label>
+          <input type="text" id="cf-hp" name="homepage" tabindex="-1" autocomplete="off">
+        </div>
         <div class="agree">
           <p><b>개인정보 수집·이용 동의</b><br>
             수집 항목: 성함, 연락처, 출신 중학교, 문의 내용 · 이용 목적: 입학 상담 회신 ·
@@ -1865,7 +1870,7 @@ function showDone(name, slots, offline){
     '<div class="done">' +
     '<div class="ok" aria-hidden="true">&#10003;</div>' +
     '<h3>상담 신청이 접수되었습니다</h3>' +
-    '<p>' + name + ' 님, <span class="slot">' + slots.join(' · ') + '</span>에 ' +
+    '<p>' + escapeHtml(name) + ' 님, <span class="slot">' + slots.map(escapeHtml).join(' · ') + '</span>에 ' +
     '교무실에서 전화드리겠습니다.</p>' +
     '<p>급하신 경우 교무실 063-530-5344로 바로 연락 주셔도 됩니다.</p>' +
     (offline ? '<p style="color:var(--ink-soft);font-size:12px;margin-top:10px">' +
@@ -1920,8 +1925,26 @@ if (cForm){
       school: cForm.querySelector('#cf-school').value.trim(),
       msg   : cForm.querySelector('#cf-msg').value.trim(),
     };
+    // ── 스팸·오입력 방지 ──
+    if (!/^0\d{1,2}-?\d{3,4}-?\d{4}$/.test(data.tel.replace(/\s/g, ''))){
+      alert('연락처를 정확히 입력해 주세요. 예) 010-1234-5678');
+      return;
+    }
+    const hp = cForm.querySelector('#cf-hp');
+    const tooFast = consultOpenedAt && (Date.now() - consultOpenedAt) < 3000;
+    if ((hp && hp.value) || tooFast){
+      showDone(data.name, slots, false);   // 봇으로 보고 전송하지 않음(화면은 정상처럼)
+      return;
+    }
+    let lastSent = 0;
+    try { lastSent = +localStorage.getItem('consultSentAt') || 0; } catch (_) {}
+    if (Date.now() - lastSent < 60000){
+      alert('방금 신청이 접수되었습니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
     const linked = !!GOOGLE_FORM.formId;
     if (linked){
+      try { localStorage.setItem('consultSentAt', String(Date.now())); } catch (_) {}
       try { sendToGoogleForm(data, slots); }
       catch (err) {
         alert('신청 전송에 실패했습니다. 교무실 063-530-5344로 연락해 주세요.');
@@ -1934,9 +1957,11 @@ if (cForm){
 
 const modal = document.getElementById('consultModal');
 let lastFocus = null;
+let consultOpenedAt = 0;
 
 function goConsult(){
   if (!modal) return;
+  consultOpenedAt = Date.now();
   lastFocus = document.activeElement;
   modal.hidden = false;
   document.body.style.overflow = 'hidden';
